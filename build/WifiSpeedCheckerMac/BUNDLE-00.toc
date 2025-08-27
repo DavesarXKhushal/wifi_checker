@@ -1,0 +1,3 @@
+([('WifiSpeedCheckerMac',
+   '/Users/davesarkd/Downloads/wifi/dist/WifiSpeedCheckerMac',
+   'EXECUTABLE')],)
