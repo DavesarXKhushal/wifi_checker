@@ -10,11 +10,10 @@ from collections import deque
 from plyer import notification
 
 ctk.set_appearance_mode("dark")
-ctk.set_default_color_theme("blue")
+ctk.set_default_color_theme("blue")  # You can try "dark-blue" too
 
-SAMPLE_INTERVAL = 2  # seconds
+SAMPLE_INTERVAL = 1  # seconds
 GRAPH_SECONDS = 120
-SPEED_DROP_THRESHOLD = 30  # Notify if download drops below this
 
 class SpeedCheckerApp(ctk.CTk):
     def __init__(self):
@@ -24,14 +23,13 @@ class SpeedCheckerApp(ctk.CTk):
         self.resizable(False, False)
         self.configure(fg_color="#232323")
 
-        self.last_notification_time = 0
+        self.last_notification = 0
+        self.last_speed_state = None
 
         self.speed_history = deque([0] * GRAPH_SECONDS, maxlen=GRAPH_SECONDS)
-        self.upload_history = deque([0] * GRAPH_SECONDS, maxlen=GRAPH_SECONDS)
-        self.ping_history = deque([0] * GRAPH_SECONDS, maxlen=GRAPH_SECONDS)
         self.time_history = deque(range(-GRAPH_SECONDS + 1, 1), maxlen=GRAPH_SECONDS)
 
-        # UI Layout (kept exactly as your code)
+        # ========== UI Layout ==========
         self.main_frame = ctk.CTkFrame(self, corner_radius=18, fg_color="#232323")
         self.main_frame.pack(fill="both", expand=True, padx=22, pady=22)
 
@@ -48,7 +46,7 @@ class SpeedCheckerApp(ctk.CTk):
         self.check_button = ctk.CTkButton(self.main_frame, text="Speed Test Now", corner_radius=16, font=("San Francisco", 18), width=190, height=36, command=self.check_speed_once)
         self.check_button.pack(pady=14)
 
-        # Matplotlib Graph
+        # ========== Matplotlib Graph ==========
         self.fig = Figure(figsize=(6, 2.3), dpi=100, facecolor="#232323")
         self.ax = self.fig.add_subplot(111)
         self.fig.subplots_adjust(left=0.07, right=0.98, bottom=0.2, top=0.85)
@@ -68,7 +66,7 @@ class SpeedCheckerApp(ctk.CTk):
         self.canvas_widget = self.canvas.get_tk_widget()
         self.canvas_widget.pack(padx=6, pady=8)
 
-        # Real-Time Monitoring
+        # ========== Real-Time Monitoring ==========
         self.running = True
         threading.Thread(target=self.real_time_speed, daemon=True).start()
 
@@ -104,34 +102,36 @@ class SpeedCheckerApp(ctk.CTk):
 
     def real_time_speed(self):
         st = speedtest.Speedtest()
+        low_speed_pending = False
+        pending_timer = 0
+
         while self.running:
             try:
                 download = st.download() / 1_000_000
                 upload = st.upload() / 1_000_000
                 ping = st.results.ping
 
-                # Store to deque for graph/history
+                # Store to deque
                 self.speed_history.append(download)
-                self.upload_history.append(upload)
-                self.ping_history.append(ping)
-                self.time_history.append(self.time_history[-1] + SAMPLE_INTERVAL)
-
-                self.ax.set_ylim(0, max(100, max(self.speed_history) + 10))
+                self.time_history.append(self.time_history[-1]+1)
+                self.ax.set_ylim(0, max(100, max(self.speed_history) + 5))
 
                 self.after(0, self.update_realtime_labels, download, upload, ping)
                 self.after(0, self.update_plot)
 
-                # Notification logic: notify on every drop below threshold
-                if download < SPEED_DROP_THRESHOLD:
-                    now = time.time()
-                    # Notify if at least 20 seconds since last notification
-                    if now - self.last_notification_time > 20:
-                        self.after(0, self.status_alert.configure, {"text": f"⚠️ Speed drop: {download:.1f} Mbps", "text_color": "#ff453a"})
-                        self.notify("WiFi Speed Warning!", f"Download speed dropped below {SPEED_DROP_THRESHOLD} Mbps: {download:.1f} Mbps")
-                        self.last_notification_time = now
+                # Live alert 5 seconds before drop
+                if download < 15:  # threshold for "drop"
+                    if not low_speed_pending:
+                        low_speed_pending = True
+                        pending_timer = time.time()
+                    elif time.time() - pending_timer >= 5:
+                        self.after(0, self.status_alert.configure, {"text": "⚠️ Speed Drop Warning!", "text_color": "#ff453a"})
+                        if time.time() - self.last_notification > 15:
+                            self.notify("WiFi Speed Alert", "Your speed is dropping!")
+                            self.last_notification = time.time()
                 else:
+                    low_speed_pending = False
                     self.after(0, self.status_alert.configure, {"text": "", "text_color": "#ff453a"})
-
                 time.sleep(SAMPLE_INTERVAL)
             except Exception as e:
                 self.after(0, self.status_alert.configure, {"text": f"Error: {e}", "text_color": "#ff453a"})
@@ -141,7 +141,7 @@ class SpeedCheckerApp(ctk.CTk):
         self.speed_label.configure(text=f"Download: {download:.2f} Mbps")
         self.upload_label.configure(text=f"Upload: {upload:.2f} Mbps")
         self.ping_label.configure(text=f"Ping: {ping:.2f} ms")
-
+        
     def on_close(self):
         self.running = False
         self.destroy()
